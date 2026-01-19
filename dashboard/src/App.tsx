@@ -2,9 +2,13 @@
 import { useEffect } from "react";
 import { Board } from "./components/Board/Board";
 import { useClaimsStore } from "./stores/claims";
+import { useWebSocket } from "./hooks/useWebSocket";
 
 export default function App() {
   const { setClaims, setLoading, setError } = useClaimsStore();
+
+  // Connect to WebSocket for real-time updates
+  useWebSocket();
 
   useEffect(() => {
     // Fetch initial claims
