@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: claims-postgres
+    environment:
+      POSTGRES_USER: claude
+      POSTGRES_PASSWORD: claude-flow-test
+      POSTGRES_DB: claude_flow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claude -d claude_flow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claims-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://claude:claude-flow-test@postgres:5432/claude_flow
+      TEAM_SECRET: ${TEAM_SECRET:-changeme}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
