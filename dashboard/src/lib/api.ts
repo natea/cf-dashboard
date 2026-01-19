@@ -1,10 +1,35 @@
 // dashboard/src/lib/api.ts
 import type { Claim, ClaimStatus, ColumnId } from "./types";
+import { getAuthHeader } from "./auth";
 
 const API_BASE = "/api";
 
+/**
+ * Make an authenticated API request
+ */
+async function authFetch(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const headers = {
+    ...getAuthHeader(),
+    ...(options.headers || {}),
+  };
+
+  const res = await fetch(url, { ...options, headers });
+
+  // Handle 401 Unauthorized
+  if (res.status === 401) {
+    // Redirect to login or show auth prompt
+    window.dispatchEvent(new CustomEvent("auth:required"));
+    throw new Error("Authentication required");
+  }
+
+  return res;
+}
+
 export async function fetchClaims(): Promise<Claim[]> {
-  const res = await fetch(`${API_BASE}/claims`);
+  const res = await authFetch(`${API_BASE}/claims`);
   if (!res.ok) throw new Error("Failed to fetch claims");
   const data = await res.json();
   return data.claims;
@@ -16,7 +41,7 @@ export async function createClaim(claim: {
   description?: string;
   source?: "manual" | "github" | "mcp";
 }): Promise<Claim> {
-  const res = await fetch(`${API_BASE}/claims`, {
+  const res = await authFetch(`${API_BASE}/claims`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(claim),
@@ -31,7 +56,7 @@ export async function updateClaimStatus(
   status: ClaimStatus,
   progress?: number
 ): Promise<Claim> {
-  const res = await fetch(`${API_BASE}/claims/${issueId}`, {
+  const res = await authFetch(`${API_BASE}/claims/${issueId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status, progress }),
@@ -42,7 +67,7 @@ export async function updateClaimStatus(
 }
 
 export async function deleteClaim(issueId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/claims/${issueId}`, {
+  const res = await authFetch(`${API_BASE}/claims/${issueId}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete claim");

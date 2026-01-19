@@ -6,10 +6,14 @@ import { nanoid } from "nanoid";
 import { claimsRoutes } from "./routes/claims";
 import { MemoryStorage } from "./storage/memory";
 import { WebSocketHub } from "./ws/hub";
+import { createAuthMiddleware, validateSecret } from "./middleware/auth";
 
 const app = new Hono();
 const storage = new MemoryStorage();
 const wsHub = new WebSocketHub();
+
+// Get secret for WebSocket auth
+const dashboardSecret = process.env.DASHBOARD_SECRET;
 
 // Subscribe to storage events and broadcast
 storage.subscribe((event) => {
@@ -24,8 +28,12 @@ storage.subscribe((event) => {
 app.use("*", logger());
 app.use("*", cors());
 
-// Health check
+// Health check (public - no auth required)
 app.get("/health", (c) => c.json({ status: "ok", clients: wsHub.getClientCount() }));
+
+// Auth middleware for protected routes
+const authMiddleware = createAuthMiddleware();
+app.use("/api/*", authMiddleware);
 
 // API routes
 app.route("/api/claims", claimsRoutes(storage));
@@ -36,7 +44,30 @@ console.log(`Server running on http://localhost:${port}`);
 
 export default {
   port,
-  fetch: app.fetch,
+  fetch(req: Request, server: any) {
+    const url = new URL(req.url);
+
+    // Handle WebSocket upgrade
+    if (url.pathname.startsWith("/ws")) {
+      // Validate token if DASHBOARD_SECRET is set
+      if (dashboardSecret) {
+        const token = url.searchParams.get("token");
+        if (!token || !validateSecret(token, dashboardSecret)) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      }
+
+      // Upgrade to WebSocket
+      const success = server.upgrade(req);
+      if (success) {
+        return undefined;
+      }
+      return new Response("WebSocket upgrade failed", { status: 500 });
+    }
+
+    // Handle regular HTTP requests
+    return app.fetch(req);
+  },
   websocket: {
     open(ws: any) {
       const clientId = nanoid();

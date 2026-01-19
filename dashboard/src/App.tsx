@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 import { Board } from "./components/Board/Board";
 import { CreateClaimForm } from "./components/CreateClaimForm";
 import { ActivitySidebar } from "./components/ActivitySidebar";
+import { AuthGuard } from "./components/AuthGuard";
 import { useClaimsStore } from "./stores/claims";
 import { useWebSocket } from "./hooks/useWebSocket";
+import { fetchClaims } from "./lib/api";
 
 export default function App() {
   const { setClaims, setLoading, setError } = useClaimsStore();
@@ -15,15 +17,15 @@ export default function App() {
   useWebSocket();
 
   useEffect(() => {
-    // Fetch initial claims
-    fetch("/api/claims")
-      .then((res) => res.json())
-      .then((data) => setClaims(data.claims))
+    // Fetch initial claims using authenticated API
+    fetchClaims()
+      .then((claims) => setClaims(claims))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [setClaims, setError, setLoading]);
 
   return (
+    <AuthGuard>
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -61,5 +63,6 @@ export default function App() {
 
       <ActivitySidebar isOpen={showActivity} onClose={() => setShowActivity(false)} />
     </div>
+    </AuthGuard>
   );
 }

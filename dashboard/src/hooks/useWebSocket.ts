@@ -2,6 +2,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useClaimsStore } from "../stores/claims";
 import { useActivityStore } from "../stores/activity";
+import { getWebSocketUrl } from "../lib/auth";
 import type { Claim } from "../lib/types";
 
 interface WSMessage {
@@ -17,9 +18,8 @@ export function useWebSocket() {
   const addActivity = useActivityStore((s) => s.addEvent);
 
   const connect = useCallback(() => {
-    // Use relative WebSocket URL for proxy support
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    // Use authenticated WebSocket URL
+    const wsUrl = getWebSocketUrl();
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
