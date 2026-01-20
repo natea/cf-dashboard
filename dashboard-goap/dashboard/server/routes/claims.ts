@@ -1,0 +1,419 @@
+// dashboard/server/routes/claims.ts
+// Claims CRUD routes with Zod validation
+
+import { Hono } from "hono";
+import { z } from "zod";
+import { HTTPException } from "hono/http-exception";
+import type { ClaimsStorage, ClaimFilter } from "../storage/interface";
+import type { ClaimStatus, ClaimSource, Claimant } from "../domain/types";
+import { authMiddleware } from "./auth";
+
+// Zod schemas for validation
+const ClaimantSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("human"),
+    userId: z.string().min(1),
+    name: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("agent"),
+    agentId: z.string().min(1),
+    agentType: z.string().min(1),
+  }),
+]);
+
+const ClaimStatusSchema = z.enum([
+  "backlog",
+  "active",
+  "paused",
+  "blocked",
+  "review-requested",
+  "completed",
+]);
+
+const ClaimSourceSchema = z.enum(["github", "manual", "mcp"]);
+
+const CreateClaimSchema = z.object({
+  issueId: z.string().min(1),
+  source: ClaimSourceSchema,
+  sourceRef: z.string().optional(),
+  title: z.string().min(1).max(500),
+  description: z.string().max(5000).optional(),
+  status: ClaimStatusSchema.optional().default("backlog"),
+  claimant: ClaimantSchema.optional(),
+  progress: z.number().min(0).max(100).optional().default(0),
+  context: z.string().max(10000).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const UpdateClaimSchema = z.object({
+  title: z.string().min(1).max(500).optional(),
+  description: z.string().max(5000).optional(),
+  status: ClaimStatusSchema.optional(),
+  claimant: ClaimantSchema.optional().nullable(),
+  progress: z.number().min(0).max(100).optional(),
+  context: z.string().max(10000).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const ClaimFilterSchema = z.object({
+  status: ClaimStatusSchema.optional(),
+  source: ClaimSourceSchema.optional(),
+  claimantType: z.enum(["human", "agent"]).optional(),
+});
+
+export interface ClaimsRoutesDeps {
+  storage: ClaimsStorage;
+}
+
+/**
+ * Helper to find a claim by id or issueId
+ * Frontend uses claim.id, but storage keys by issueId
+ */
+async function findClaim(storage: ClaimsStorage, identifier: string) {
+  // First try direct lookup by issueId
+  let claim = await storage.getClaim(identifier);
+  if (claim) return claim;
+
+  // If not found, search by id field
+  const allClaims = await storage.listClaims();
+  return allClaims.find((c) => c.id === identifier) || null;
+}
+
+export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
+  const claims = new Hono();
+
+  // Apply auth middleware to all routes
+  claims.use("/*", authMiddleware());
+
+  // List claims with optional filters
+  claims.get("/", async (c) => {
+    const query = c.req.query();
+
+    // Parse and validate filter
+    const filterResult = ClaimFilterSchema.safeParse({
+      status: query.status,
+      source: query.source,
+      claimantType: query.claimantType,
+    });
+
+    const filter: ClaimFilter = filterResult.success ? filterResult.data : {};
+
+    const claimsList = await deps.storage.listClaims(filter);
+
+    return c.json({
+      claims: claimsList,
+      count: claimsList.length,
+      filter,
+    });
+  });
+
+  // Get single claim by id or issueId
+  claims.get("/:issueId", async (c) => {
+    const issueId = c.req.param("issueId");
+    const claim = await findClaim(deps.storage, issueId);
+
+    if (!claim) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${issueId}`,
+      });
+    }
+
+    return c.json(claim);
+  });
+
+  // Create new claim
+  claims.post("/", async (c) => {
+    const body = await c.req.json();
+
+    const result = CreateClaimSchema.safeParse(body);
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: "Validation error",
+        cause: result.error.flatten(),
+      });
+    }
+
+    // Check if claim already exists
+    const existing = await deps.storage.getClaim(result.data.issueId);
+    if (existing) {
+      throw new HTTPException(409, {
+        message: `Claim already exists: ${result.data.issueId}`,
+      });
+    }
+
+    const claim = await deps.storage.createClaim(result.data);
+
+    return c.json(claim, 201);
+  });
+
+  // Update existing claim
+  claims.put("/:issueId", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json();
+
+    const result = UpdateClaimSchema.safeParse(body);
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: "Validation error",
+        cause: result.error.flatten(),
+      });
+    }
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    // Handle null claimant (unclaim) - convert null to undefined for storage
+    const { claimant, ...rest } = result.data;
+    const updates = {
+      ...rest,
+      ...(claimant !== null && claimant !== undefined ? { claimant } : {}),
+    };
+
+    const updated = await deps.storage.updateClaim(existing.issueId, updates);
+
+    return c.json(updated);
+  });
+
+  // Partial update (PATCH)
+  claims.patch("/:issueId", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json();
+
+    const result = UpdateClaimSchema.partial().safeParse(body);
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: "Validation error",
+        cause: result.error.flatten(),
+      });
+    }
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    // Handle null claimant for PATCH
+    const { claimant, ...rest } = result.data;
+    const patchUpdates = {
+      ...rest,
+      ...(claimant !== null && claimant !== undefined ? { claimant } : {}),
+    };
+
+    const updated = await deps.storage.updateClaim(existing.issueId, patchUpdates);
+
+    return c.json(updated);
+  });
+
+  // Delete claim
+  claims.delete("/:issueId", async (c) => {
+    const identifier = c.req.param("issueId");
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const deleted = await deps.storage.deleteClaim(existing.issueId);
+
+    return c.json({ deleted: true, issueId: existing.issueId });
+  });
+
+  // Claim an issue (shorthand for update with claimant)
+  claims.post("/:issueId/claim", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json();
+
+    const claimantResult = ClaimantSchema.safeParse(body.claimant);
+    if (!claimantResult.success) {
+      throw new HTTPException(400, {
+        message: "Invalid claimant",
+        cause: claimantResult.error.flatten(),
+      });
+    }
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    if (existing.claimant) {
+      throw new HTTPException(409, {
+        message: `Issue already claimed by ${existing.claimant.type === "human" ? existing.claimant.name : existing.claimant.agentId}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      claimant: claimantResult.data,
+      status: "active",
+    });
+
+    return c.json(updated);
+  });
+
+  // Release claim (unclaim)
+  claims.post("/:issueId/release", async (c) => {
+    const identifier = c.req.param("issueId");
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      claimant: undefined,
+      status: "backlog",
+    });
+
+    return c.json(updated);
+  });
+
+  // Update progress
+  claims.post("/:issueId/progress", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json();
+
+    const progressResult = z.number().min(0).max(100).safeParse(body.progress);
+    if (!progressResult.success) {
+      throw new HTTPException(400, {
+        message: "Invalid progress value (must be 0-100)",
+      });
+    }
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      progress: progressResult.data,
+    });
+
+    return c.json(updated);
+  });
+
+  // Update status directly
+  claims.put("/:issueId/status", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json();
+
+    const statusResult = ClaimStatusSchema.safeParse(body.status);
+    if (!statusResult.success) {
+      throw new HTTPException(400, {
+        message: "Invalid status value",
+        cause: statusResult.error.flatten(),
+      });
+    }
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      status: statusResult.data,
+    });
+
+    return c.json(updated);
+  });
+
+  // Request review (move to human review)
+  claims.post("/:issueId/review", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json().catch(() => ({}));
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      status: "review-requested",
+      metadata: {
+        ...existing.metadata,
+        reviewNotes: body.notes,
+        reviewRequestedAt: new Date().toISOString(),
+      },
+    });
+
+    return c.json(updated);
+  });
+
+  // Request revision (send back for changes)
+  claims.post("/:issueId/revision", async (c) => {
+    const identifier = c.req.param("issueId");
+    const body = await c.req.json().catch(() => ({}));
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      status: "active",
+      metadata: {
+        ...existing.metadata,
+        postReview: true,
+        revisionNotes: body.notes,
+        revisionRequestedAt: new Date().toISOString(),
+      },
+    });
+
+    return c.json(updated);
+  });
+
+  // Mark as complete
+  claims.post("/:issueId/complete", async (c) => {
+    const identifier = c.req.param("issueId");
+
+    // Find claim by id or issueId
+    const existing = await findClaim(deps.storage, identifier);
+    if (!existing) {
+      throw new HTTPException(404, {
+        message: `Claim not found: ${identifier}`,
+      });
+    }
+
+    const updated = await deps.storage.updateClaim(existing.issueId, {
+      status: "completed",
+      progress: 100,
+      metadata: {
+        ...existing.metadata,
+        completedAt: new Date().toISOString(),
+      },
+    });
+
+    return c.json(updated);
+  });
+
+  return claims;
+}
