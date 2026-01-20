@@ -254,10 +254,23 @@ export interface Logger {
   error(message: string, ...args: unknown[]): void;
 }
 
-// Simple console logger
+// ANSI color codes for terminal output
+const colors = {
+  reset: "\x1b[0m",
+  cyan: "\x1b[36m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+  dim: "\x1b[2m",
+};
+
+// Colored console logger - cyan prefix makes orchestrator logs stand out
 export const consoleLogger: Logger = {
-  debug: (msg, ...args) => console.debug(`[orchestrator] ${msg}`, ...args),
-  info: (msg, ...args) => console.log(`[orchestrator] ${msg}`, ...args),
-  warn: (msg, ...args) => console.warn(`[orchestrator] ${msg}`, ...args),
-  error: (msg, ...args) => console.error(`[orchestrator] ${msg}`, ...args),
+  debug: (msg, ...args) =>
+    console.debug(`${colors.cyan}[orchestrator]${colors.reset} ${colors.dim}${msg}${colors.reset}`, ...args),
+  info: (msg, ...args) =>
+    console.log(`${colors.cyan}[orchestrator]${colors.reset} ${msg}`, ...args),
+  warn: (msg, ...args) =>
+    console.warn(`${colors.yellow}[orchestrator]${colors.reset} ${msg}`, ...args),
+  error: (msg, ...args) =>
+    console.error(`${colors.red}[orchestrator]${colors.reset} ${msg}`, ...args),
 };
