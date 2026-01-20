@@ -7,6 +7,7 @@ import { claimsRoutes } from "./routes/claims";
 import { MemoryStorage } from "./storage/memory";
 import { WebSocketHub } from "./ws/hub";
 import { createAuthMiddleware, validateSecret } from "./middleware/auth";
+import { GitHubSync } from "./github/sync";
 
 const app = new Hono();
 const storage = new MemoryStorage();
@@ -14,6 +15,27 @@ const wsHub = new WebSocketHub();
 
 // Get secret for WebSocket auth
 const dashboardSecret = process.env.DASHBOARD_SECRET;
+
+// GitHub sync configuration
+const githubOwner = process.env.GITHUB_OWNER;
+const githubRepo = process.env.GITHUB_REPO;
+
+if (githubOwner && githubRepo) {
+  const githubSync = new GitHubSync(
+    {
+      owner: githubOwner,
+      repo: githubRepo,
+      token: process.env.GITHUB_TOKEN,
+      labels: process.env.GITHUB_LABELS?.split(",").map((l) => l.trim()),
+      pollInterval: parseInt(process.env.GITHUB_POLL_INTERVAL || "60"),
+    },
+    storage
+  );
+  githubSync.start();
+  console.log(`GitHub sync enabled for ${githubOwner}/${githubRepo}`);
+} else {
+  console.log("GitHub sync disabled (set GITHUB_OWNER and GITHUB_REPO to enable)");
+}
 
 // Subscribe to storage events and broadcast
 storage.subscribe((event) => {
@@ -30,6 +52,29 @@ app.use("*", cors());
 
 // Health check (public - no auth required)
 app.get("/health", (c) => c.json({ status: "ok", clients: wsHub.getClientCount() }));
+
+// Root route - helpful message for development
+app.get("/", (c) => {
+  return c.html(`
+    <!DOCTYPE html>
+    <html>
+      <head><title>Claims Dashboard API</title></head>
+      <body style="font-family: system-ui; padding: 2rem; max-width: 600px; margin: 0 auto;">
+        <h1>Claims Dashboard API</h1>
+        <p>This is the backend API server.</p>
+        <h2>Development</h2>
+        <p>Run the frontend with: <code>bun run dev:client</code></p>
+        <p>Then open: <a href="http://localhost:5173">http://localhost:5173</a></p>
+        <h2>API Endpoints</h2>
+        <ul>
+          <li><a href="/health">/health</a> - Health check</li>
+          <li>/api/claims - Claims REST API</li>
+          <li>/ws - WebSocket endpoint</li>
+        </ul>
+      </body>
+    </html>
+  `);
+});
 
 // Auth middleware for protected routes
 const authMiddleware = createAuthMiddleware();

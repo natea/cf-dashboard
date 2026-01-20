@@ -8,12 +8,13 @@ import { useClaimsStore } from "./stores/claims";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { fetchClaims } from "./lib/api";
 
-export default function App() {
+// Dashboard content - only rendered after authentication
+function DashboardContent() {
   const { setClaims, setLoading, setError } = useClaimsStore();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
 
-  // Connect to WebSocket for real-time updates
+  // Connect to WebSocket for real-time updates (only after auth)
   useWebSocket();
 
   useEffect(() => {
@@ -25,7 +26,6 @@ export default function App() {
   }, [setClaims, setError, setLoading]);
 
   return (
-    <AuthGuard>
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -63,6 +63,13 @@ export default function App() {
 
       <ActivitySidebar isOpen={showActivity} onClose={() => setShowActivity(false)} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthGuard>
+      <DashboardContent />
     </AuthGuard>
   );
 }
