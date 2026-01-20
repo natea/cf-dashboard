@@ -160,11 +160,13 @@ export interface WSMessage {
 }
 
 export interface ClaimEvent {
-  type: "claim_created" | "claim_updated" | "claim_deleted" | "agent_activity";
+  type: "claim.created" | "claim.updated" | "claim.deleted" | "agent.activity";
   claim?: Claim;
   claimId?: string;
+  issueId?: string;
   activity?: AgentActivity;
-  timestamp: string;
+  changes?: Partial<Claim>;
+  timestamp?: string;
 }
 
 export interface AgentActivity {

@@ -5,8 +5,10 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { HTTPException } from "hono/http-exception";
 import type { ClaimsStorage, ClaimFilter } from "../storage/interface";
-import type { ClaimStatus, ClaimSource, Claimant } from "../domain/types";
+import type { ClaimStatus, ClaimSource, Claimant, Claim } from "../domain/types";
 import { authMiddleware } from "./auth";
+import { hub } from "../ws/hub";
+import type { ClaimCreatedEvent, ClaimUpdatedEvent, ClaimDeletedEvent } from "../ws/types";
 
 // Zod schemas for validation
 const ClaimantSchema = z.discriminatedUnion("type", [
@@ -80,6 +82,40 @@ async function findClaim(storage: ClaimsStorage, identifier: string) {
   return allClaims.find((c) => c.id === identifier) || null;
 }
 
+/**
+ * Broadcast claim created event to WebSocket clients
+ */
+function broadcastClaimCreated(claim: Claim): void {
+  const event: ClaimCreatedEvent = {
+    type: "claim.created",
+    claim,
+  };
+  hub.broadcast(event);
+}
+
+/**
+ * Broadcast claim updated event to WebSocket clients
+ */
+function broadcastClaimUpdated(claim: Claim, changes: Partial<Claim>): void {
+  const event: ClaimUpdatedEvent = {
+    type: "claim.updated",
+    claim,
+    changes,
+  };
+  hub.broadcast(event);
+}
+
+/**
+ * Broadcast claim deleted event to WebSocket clients
+ */
+function broadcastClaimDeleted(issueId: string): void {
+  const event: ClaimDeletedEvent = {
+    type: "claim.deleted",
+    issueId,
+  };
+  hub.broadcast(event);
+}
+
 export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
   const claims = new Hono();
 
@@ -144,6 +180,9 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
 
     const claim = await deps.storage.createClaim(result.data);
 
+    // Broadcast to WebSocket clients
+    broadcastClaimCreated(claim);
+
     return c.json(claim, 201);
   });
 
@@ -176,6 +215,11 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
     };
 
     const updated = await deps.storage.updateClaim(existing.issueId, updates);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, updates);
+    }
 
     return c.json(updated);
   });
@@ -210,6 +254,11 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
 
     const updated = await deps.storage.updateClaim(existing.issueId, patchUpdates);
 
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, patchUpdates);
+    }
+
     return c.json(updated);
   });
 
@@ -226,6 +275,9 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
     }
 
     const deleted = await deps.storage.deleteClaim(existing.issueId);
+
+    // Broadcast to WebSocket clients
+    broadcastClaimDeleted(existing.issueId);
 
     return c.json({ deleted: true, issueId: existing.issueId });
   });
@@ -257,10 +309,16 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
+    const changes = {
       claimant: claimantResult.data,
-      status: "active",
-    });
+      status: "active" as const,
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -277,10 +335,16 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
+    const changes = {
       claimant: undefined,
-      status: "backlog",
-    });
+      status: "backlog" as const,
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -305,9 +369,15 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
+    const changes = {
       progress: progressResult.data,
-    });
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -333,9 +403,15 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
+    const changes = {
       status: statusResult.data,
-    });
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -353,14 +429,20 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
-      status: "review-requested",
+    const changes = {
+      status: "review-requested" as const,
       metadata: {
         ...existing.metadata,
         reviewNotes: body.notes,
         reviewRequestedAt: new Date().toISOString(),
       },
-    });
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -378,15 +460,21 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
-      status: "active",
+    const changes = {
+      status: "active" as const,
       metadata: {
         ...existing.metadata,
         postReview: true,
         revisionNotes: body.notes,
         revisionRequestedAt: new Date().toISOString(),
       },
-    });
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });
@@ -403,14 +491,20 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const updated = await deps.storage.updateClaim(existing.issueId, {
-      status: "completed",
+    const changes = {
+      status: "completed" as const,
       progress: 100,
       metadata: {
         ...existing.metadata,
         completedAt: new Date().toISOString(),
       },
-    });
+    };
+    const updated = await deps.storage.updateClaim(existing.issueId, changes);
+
+    if (updated) {
+      // Broadcast to WebSocket clients
+      broadcastClaimUpdated(updated, changes);
+    }
 
     return c.json(updated);
   });

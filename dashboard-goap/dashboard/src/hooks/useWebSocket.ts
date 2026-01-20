@@ -23,25 +23,25 @@ export function useWebSocket() {
   const handleEvent = useCallback(
     (event: ClaimEvent) => {
       switch (event.type) {
-        case "claim_created":
+        case "claim.created":
           if (event.claim) {
             updateClaim(event.claim);
           }
           break;
 
-        case "claim_updated":
+        case "claim.updated":
           if (event.claim) {
             updateClaim(event.claim);
           }
           break;
 
-        case "claim_deleted":
-          if (event.claimId) {
-            removeClaim(event.claimId);
+        case "claim.deleted":
+          if (event.claimId || event.issueId) {
+            removeClaim(event.claimId || event.issueId!);
           }
           break;
 
-        case "agent_activity":
+        case "agent.activity":
           if (event.activity) {
             addLog(event.activity);
           }
