@@ -9,13 +9,23 @@ export type ClaimStatus =
 
 export type ClaimSource = "github" | "manual" | "mcp";
 
+// Valid Claude Code agent types
 export type AgentType =
   | "coder"
   | "researcher"
   | "tester"
   | "reviewer"
   | "architect"
-  | "debugger";
+  | "coordinator"
+  | "analyst"
+  | "optimizer"
+  | "security-architect"
+  | "security-auditor"
+  | "memory-specialist"
+  | "swarm-specialist"
+  | "performance-engineer"
+  | "core-architect"
+  | "test-architect";
 
 export interface HumanClaimant {
   type: "human";

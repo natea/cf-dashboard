@@ -217,7 +217,7 @@ describe("TaskRouter", () => {
     expect(result.confidence).toBeLessThanOrEqual(1);
   });
 
-  it("should detect bug-related tasks and route to debugger", async () => {
+  it("should detect bug-related tasks and route to coder", async () => {
     const router = new TaskRouter();
     (router as unknown as { claudeFlowAvailable: boolean | null }).claudeFlowAvailable = false;
 
@@ -227,7 +227,8 @@ describe("TaskRouter", () => {
       labels: ["bug"],
     });
 
-    expect(result.agentType).toBe("debugger");
+    // "debugger" is not a valid Claude Code agent type, bugs route to "coder"
+    expect(result.agentType).toBe("coder");
   });
 
   it("should detect test-related tasks and route to tester", async () => {

@@ -25,33 +25,43 @@ const DEFAULT_ROUTING: RoutingResult = {
 
 /**
  * Label-to-agent-type mapping for fallback heuristics
+ * Note: "debugger" is not a valid Claude Code agent type, use "coder" for bug fixes
  */
 const LABEL_AGENT_MAP: Record<string, AgentType> = {
-  bug: "debugger",
-  bugfix: "debugger",
-  fix: "debugger",
-  debug: "debugger",
+  bug: "coder",
+  bugfix: "coder",
+  fix: "coder",
+  debug: "coder",
   feature: "coder",
   enhancement: "coder",
   test: "tester",
   testing: "tester",
   "needs-tests": "tester",
+  "test-architect": "test-architect",
   review: "reviewer",
   "code-review": "reviewer",
   research: "researcher",
   investigation: "researcher",
+  analysis: "analyst",
   architecture: "architect",
   design: "architect",
   refactor: "architect",
   documentation: "researcher",
   docs: "researcher",
+  security: "security-architect",
+  "security-audit": "security-auditor",
+  performance: "performance-engineer",
+  optimization: "optimizer",
 };
 
 /**
  * Title keyword patterns for fallback heuristics
+ * Note: "debugger" is not a valid Claude Code agent type, use "coder" for bug fixes
  */
 const TITLE_PATTERNS: Array<{ pattern: RegExp; agentType: AgentType }> = [
-  { pattern: /\b(bug|fix|crash|error|broken)\b/i, agentType: "debugger" },
+  { pattern: /\b(security|vuln|cve)\b/i, agentType: "security-architect" },
+  { pattern: /\b(performance|perf|slow|optimize)\b/i, agentType: "performance-engineer" },
+  { pattern: /\b(bug|fix|crash|error|broken)\b/i, agentType: "coder" },
   { pattern: /\b(test|spec|coverage)\b/i, agentType: "tester" },
   { pattern: /\b(review|audit)\b/i, agentType: "reviewer" },
   { pattern: /\b(research|investigate|analyze)\b/i, agentType: "researcher" },
@@ -347,9 +357,9 @@ export class TaskRouter {
       architect: "architect",
       architecture: "architect",
       designer: "architect",
-      debugger: "debugger",
-      debug: "debugger",
-      fixer: "debugger",
+      debugger: "coder",
+      debug: "coder",
+      fixer: "coder",
     };
 
     return mapping[normalized] ?? "coder";
