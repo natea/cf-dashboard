@@ -469,15 +469,8 @@ export class Orchestrator {
       });
 
       if (spawnResult.success && spawnResult.agentId) {
-        // Claim the issue with the agent as the claimant
-        // This sets the claimant and status to "active" in one API call
-        await this.dashboardClient.claimIssue(claim.id, {
-          type: "agent",
-          agentId: spawnResult.agentId,
-          agentType: routing.agentType,
-        });
-
-        // Track the spawned agent
+        // Track the spawned agent FIRST, before any async operations
+        // This ensures lifecycle callbacks can find the agent even if it completes quickly
         const spawnedAgent: SpawnedAgent = {
           agentId: spawnResult.agentId,
           agentType: routing.agentType,
@@ -492,6 +485,14 @@ export class Orchestrator {
 
         this.activeAgents.set(spawnResult.agentId, spawnedAgent);
         this.claimsProcessed++;
+
+        // Claim the issue with the agent as the claimant
+        // This sets the claimant and status to "active" in one API call
+        await this.dashboardClient.claimIssue(claim.id, {
+          type: "agent",
+          agentId: spawnResult.agentId,
+          agentType: routing.agentType,
+        });
 
         // Emit events
         this.emitEvent({
