@@ -1,7 +1,7 @@
 // dashboard/orchestrator/dashboard-client.ts
 // Dashboard client for communication with the Claims Dashboard server
 
-import type { Claim, ClaimStatus } from "../server/domain/types";
+import type { Claim, ClaimStatus, AgentClaimant } from "../server/domain/types";
 import type {
   DashboardConfig,
   ClaimFilter,
@@ -201,12 +201,12 @@ export class DashboardClient {
   }
 
   /**
-   * Claim an issue by ID.
+   * Claim an issue by ID with an agent claimant.
    */
-  async claimIssue(issueId: string, claimant: string): Promise<Claim> {
+  async claimIssue(issueId: string, claimant: AgentClaimant): Promise<Claim> {
     const url = `${this.config.url}/api/claims/${encodeURIComponent(issueId)}/claim`;
 
-    this.logger.debug(`Claiming issue: ${issueId} for ${claimant}`);
+    this.logger.debug(`Claiming issue: ${issueId} for agent ${claimant.agentId} (${claimant.agentType})`);
 
     // API returns claim directly, not wrapped in { claim: ... }
     const response = await this.httpRequest<Claim>(url, {

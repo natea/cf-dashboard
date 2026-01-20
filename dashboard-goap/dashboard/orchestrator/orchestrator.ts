@@ -457,10 +457,7 @@ export class Orchestrator {
         `Routing result for ${claim.id}: ${routing.agentType}/${routing.modelTier} (confidence: ${routing.confidence})`
       );
 
-      // Update claim status to active
-      await this.dashboardClient.updateClaimStatus(claim.id, "active", 0);
-
-      // Spawn the agent
+      // Spawn the agent first to get the agentId
       const spawnResult = await this.agentSpawner.spawn({
         agentType: routing.agentType,
         modelTier: routing.modelTier,
@@ -471,6 +468,14 @@ export class Orchestrator {
       });
 
       if (spawnResult.success && spawnResult.agentId) {
+        // Claim the issue with the agent as the claimant
+        // This sets the claimant and status to "active" in one API call
+        await this.dashboardClient.claimIssue(claim.id, {
+          type: "agent",
+          agentId: spawnResult.agentId,
+          agentType: routing.agentType,
+        });
+
         // Track the spawned agent
         const spawnedAgent: SpawnedAgent = {
           agentId: spawnResult.agentId,
