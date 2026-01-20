@@ -1,0 +1,73 @@
+services:
+  # RuVector/Postgres database
+  ruvector-postgres:
+    image: ruvnet/ruvector-postgres:latest
+    container_name: ruvector-postgres
+    environment:
+      POSTGRES_USER: claude
+      POSTGRES_PASSWORD: claude-flow-test
+      POSTGRES_DB: claude_flow
+    ports:
+      - "5432:5432"
+    volumes:
+      - ruvector_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claude -d claude_flow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - claims-network
+
+  # Claims Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claims-dashboard
+    environment:
+      # Database
+      DATABASE_URL: postgres://claude:claude-flow-test@ruvector-postgres:5432/claude_flow
+
+      # Server
+      PORT: 3000
+      HOST: 0.0.0.0
+
+      # Auth
+      TEAM_SECRET: ${TEAM_SECRET:-changeme}
+
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      # Claude Flow hooks (optional - for receiving agent events)
+      CLAUDE_FLOW_HOOK_URL: ${CLAUDE_FLOW_HOOK_URL:-}
+
+      # GitHub integration (optional)
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITHUB_OWNER: ${GITHUB_OWNER:-}
+      GITHUB_REPO: ${GITHUB_REPO:-}
+      GITHUB_LABELS: ${GITHUB_LABELS:-ready,approved}
+      GITHUB_POLL_INTERVAL: ${GITHUB_POLL_INTERVAL:-60}
+    ports:
+      - "3000:3000"
+    depends_on:
+      ruvector-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - claims-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  claims-network:
+    driver: bridge
+
+volumes:
+  ruvector_data:
+    driver: local

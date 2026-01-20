@@ -1,0 +1,14 @@
+# Bun configuration for Claims Dashboard
+
+[install]
+# Use exact versions for reproducible builds
+exact = true
+
+[run]
+# Enable hot reloading for development
+bun = true
+
+[test]
+# Test configuration
+coverage = true
+coverageDir = "coverage"
