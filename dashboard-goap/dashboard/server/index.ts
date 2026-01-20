@@ -15,6 +15,7 @@ import { createClaimsRoutes } from "./routes/claims";
 import hooksRoutes from "./routes/hooks";
 import { hub, type WebSocketData } from "./ws/hub";
 import { createGitHubSyncFromEnv, type GitHubSyncService } from "./github/sync";
+import { aggregator } from "./events/aggregator";
 
 // Server state
 let storage: ClaimsStorage | null = null;
@@ -37,6 +38,13 @@ async function createApp() {
   // Connect WebSocket hub to storage for snapshot delivery
   hub.setStorage(storage);
   hub.startHeartbeat();
+
+  // Connect event aggregator to hub for agent activity logs
+  // This broadcasts agent events (started, progress, log, completed) to the "logs" room
+  aggregator.on((event) => {
+    // hub.broadcast() internally calls getEventRooms() to determine target rooms
+    hub.broadcast(event);
+  });
 
   // Global middleware
   app.use("*", cors({
