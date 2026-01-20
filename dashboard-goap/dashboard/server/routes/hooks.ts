@@ -278,4 +278,100 @@ hooks.get("/health", (c) => {
   });
 });
 
+// ===========================================================================
+// Agent Orchestrator Hook Endpoint
+// ===========================================================================
+
+const agentHookSchema = z.object({
+  agentId: z.string(),
+  claimId: z.string(),
+  issueId: z.string(),
+  event: z.enum(["started", "progress", "completed", "failed"]),
+  progress: z.number().min(0).max(100).optional(),
+  error: z.string().optional(),
+  result: z.unknown().optional(),
+  timestamp: z.string().optional(),
+});
+
+/**
+ * POST /hooks/agent
+ *
+ * Endpoint for agent orchestrator to report agent lifecycle events.
+ * This receives status updates from spawned agents.
+ *
+ * @example
+ * curl -X POST http://localhost:3000/api/hooks/agent \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"agentId": "coder-abc123", "claimId": "xyz", "issueId": "123", "event": "completed"}'
+ */
+hooks.post("/agent", async (c) => {
+  const body = await c.req.json();
+
+  const result = agentHookSchema.safeParse(body);
+  if (!result.success) {
+    return c.json(
+      {
+        error: "Invalid agent hook payload",
+        details: result.error.issues,
+      },
+      400
+    );
+  }
+
+  const payload = result.data;
+
+  // Add timestamp if not present
+  if (!payload.timestamp) {
+    payload.timestamp = new Date().toISOString();
+  }
+
+  // Log the agent event
+  console.log(
+    `[hooks] Agent ${payload.agentId} event: ${payload.event}` +
+      (payload.progress !== undefined ? ` (${payload.progress}%)` : "") +
+      (payload.error ? ` - Error: ${payload.error}` : "")
+  );
+
+  // Convert to HookPayload format and process through aggregator
+  try {
+    const hookPayload: HookPayload = {
+      hook: payload.event === "completed" || payload.event === "failed"
+        ? "agent-terminate"
+        : payload.event === "started"
+          ? "agent-spawn"
+          : "post-task",
+      agentId: payload.agentId,
+      taskId: payload.claimId,
+      timestamp: payload.timestamp,
+      success: payload.event === "completed",
+      progress: payload.progress,
+      // Pass through additional data
+      ...(payload.event === "started" && { agentType: "orchestrator-agent" }),
+      ...(payload.event === "completed" || payload.event === "failed" && {
+        result: payload.event === "completed" ? "success" : "failure",
+      }),
+      ...(payload.error && { error: payload.error }),
+    };
+
+    aggregator.processHook(hookPayload);
+
+    return c.json({
+      ok: true,
+      event: payload.event,
+      agentId: payload.agentId,
+      claimId: payload.claimId,
+      timestamp: payload.timestamp,
+    });
+  } catch (error) {
+    console.error("[hooks] Error processing agent hook:", error);
+    return c.json(
+      {
+        error: "Failed to process agent hook",
+        message: error instanceof Error ? error.message : "Unknown error",
+      },
+      500
+    );
+  }
+});
+
 export default hooks;

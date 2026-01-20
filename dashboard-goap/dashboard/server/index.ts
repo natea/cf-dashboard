@@ -12,6 +12,7 @@ import { createStorage, closeStorage, type ClaimsStorage } from "./storage";
 import { createHealthRoutes } from "./routes/health";
 import { createAuthRoutes } from "./routes/auth";
 import { createClaimsRoutes } from "./routes/claims";
+import hooksRoutes from "./routes/hooks";
 import { hub, type WebSocketData } from "./ws/hub";
 import { createGitHubSyncFromEnv, type GitHubSyncService } from "./github/sync";
 
@@ -63,6 +64,7 @@ async function createApp() {
   app.route("/health", createHealthRoutes({ storage, startTime }));
   app.route("/api/auth", createAuthRoutes());
   app.route("/api/claims", createClaimsRoutes({ storage }));
+  app.route("/api/hooks", hooksRoutes);
 
   // Root endpoint
   app.get("/", (c) => {

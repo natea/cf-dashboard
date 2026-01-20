@@ -187,10 +187,11 @@ export class DashboardClient {
     this.logger.debug(`Fetching claim: ${url}`);
 
     try {
-      const response = await this.httpRequest<{ claim: Claim }>(url, {
+      // API returns claim directly, not wrapped in { claim: ... }
+      const response = await this.httpRequest<Claim>(url, {
         method: "GET",
       });
-      return this.parseClaimDates(response.claim);
+      return this.parseClaimDates(response);
     } catch (error) {
       if (error instanceof HttpError && error.status === 404) {
         return null;
@@ -207,12 +208,13 @@ export class DashboardClient {
 
     this.logger.debug(`Claiming issue: ${issueId} for ${claimant}`);
 
-    const response = await this.httpRequest<{ claim: Claim }>(url, {
+    // API returns claim directly, not wrapped in { claim: ... }
+    const response = await this.httpRequest<Claim>(url, {
       method: "POST",
       body: JSON.stringify({ claimant }),
     });
 
-    return this.parseClaimDates(response.claim);
+    return this.parseClaimDates(response);
   }
 
   /**
@@ -232,12 +234,13 @@ export class DashboardClient {
       body.progress = progress;
     }
 
-    const response = await this.httpRequest<{ claim: Claim }>(url, {
+    // API returns claim directly, not wrapped in { claim: ... }
+    const response = await this.httpRequest<Claim>(url, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
 
-    return this.parseClaimDates(response.claim);
+    return this.parseClaimDates(response);
   }
 
   /**
