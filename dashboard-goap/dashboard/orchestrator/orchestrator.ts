@@ -3,7 +3,7 @@
 
 import { DashboardClient } from "./dashboard-client";
 import { TaskRouter } from "./task-router";
-import { AgentSpawner } from "./agent-spawner";
+import { AgentSpawner, type AgentLifecycleEvent } from "./agent-spawner";
 import type {
   OrchestratorConfig,
   OrchestratorState,
@@ -124,6 +124,7 @@ export class Orchestrator {
       dashboardUrl: this.config.dashboardUrl,
       workingDir: this.config.workingDir,
       logger: this.logger,
+      onAgentLifecycle: (event) => this.handleAgentLifecycleEvent(event),
     });
 
     this.logger.info(`Orchestrator ${this.id} initialized`);
@@ -763,6 +764,54 @@ export class Orchestrator {
   }
 
   /**
+   * Handle agent lifecycle events from the spawner.
+   * This is the direct callback from the spawner when agents complete or fail.
+   */
+  private handleAgentLifecycleEvent(event: AgentLifecycleEvent): void {
+    this.logger.debug(
+      `Agent lifecycle event: ${event.type} for agent ${event.agentId}`
+    );
+
+    // Map lifecycle events to agent status updates
+    switch (event.type) {
+      case "started":
+        this.handleAgentStatus({
+          agentId: event.agentId,
+          claimId: event.claimId,
+          status: "running",
+        });
+        break;
+
+      case "progress":
+        this.handleAgentStatus({
+          agentId: event.agentId,
+          claimId: event.claimId,
+          status: "running",
+          progress: event.progress,
+        });
+        break;
+
+      case "completed":
+        this.handleAgentStatus({
+          agentId: event.agentId,
+          claimId: event.claimId,
+          status: "completed",
+          progress: 100,
+        });
+        break;
+
+      case "failed":
+        this.handleAgentStatus({
+          agentId: event.agentId,
+          claimId: event.claimId,
+          status: "failed",
+          error: event.error,
+        });
+        break;
+    }
+  }
+
+  /**
    * Handle an agent status update.
    */
   private handleAgentStatus(payload: {
@@ -805,9 +854,9 @@ export class Orchestrator {
       this.claimsSucceeded++;
       this.activeAgents.delete(agentId);
 
-      // Update claim status
+      // Move claim to needs_review status (not completed - that requires human approval)
       this.dashboardClient
-        .updateClaimStatus(claimId, "completed", 100)
+        .updateClaimStatus(claimId, "needs_review", 100)
         .catch((e) => {
           this.logger.warn(
             `Failed to update claim ${claimId} status: ${e instanceof Error ? e.message : String(e)}`
@@ -823,7 +872,9 @@ export class Orchestrator {
         timestamp: new Date(),
       });
 
-      this.logger.info(`Agent ${agentId} completed claim ${claimId}`);
+      this.logger.info(
+        `Agent ${agentId} completed claim ${claimId} - moved to needs_review`
+      );
 
       // Check if we're shutting down and all agents are done
       this.checkShutdownComplete();

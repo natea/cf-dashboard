@@ -27,12 +27,22 @@ interface ActiveAgent {
   startedAt: Date;
 }
 
+// Agent lifecycle event types
+export type AgentLifecycleEvent =
+  | { type: "started"; agentId: string; claimId: string; issueId: string }
+  | { type: "progress"; agentId: string; claimId: string; issueId: string; progress: number }
+  | { type: "completed"; agentId: string; claimId: string; issueId: string; result?: { stdout: string } }
+  | { type: "failed"; agentId: string; claimId: string; issueId: string; error: string };
+
+export type AgentLifecycleCallback = (event: AgentLifecycleEvent) => void;
+
 interface AgentSpawnerConfig {
   dashboardUrl: string;
   workingDir?: string;
   logger?: Logger;
   useClaudeFlowCli?: boolean;
   claudeFlowPath?: string;
+  onAgentLifecycle?: AgentLifecycleCallback;
 }
 
 // ============================================================================
@@ -98,6 +108,7 @@ export class AgentSpawner {
   private claudeFlowPath: string;
   private activeAgents: Map<string, ActiveAgent> = new Map();
   private isShuttingDown = false;
+  private onAgentLifecycle?: AgentLifecycleCallback;
 
   constructor(config: AgentSpawnerConfig) {
     this.dashboardUrl = config.dashboardUrl;
@@ -105,6 +116,22 @@ export class AgentSpawner {
     this.logger = config.logger ?? consoleLogger;
     this.useClaudeFlowCli = config.useClaudeFlowCli ?? true;
     this.claudeFlowPath = config.claudeFlowPath ?? "npx @claude-flow/cli@latest";
+    this.onAgentLifecycle = config.onAgentLifecycle;
+  }
+
+  /**
+   * Emit an agent lifecycle event to the callback if registered
+   */
+  private emitLifecycleEvent(event: AgentLifecycleEvent): void {
+    if (this.onAgentLifecycle) {
+      try {
+        this.onAgentLifecycle(event);
+      } catch (error) {
+        this.logger.error(
+          `Error in lifecycle callback: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
   }
 
   /**
@@ -426,7 +453,7 @@ export class AgentSpawner {
       if (exitCode === 0) {
         this.logger.info(`Agent ${agentId} completed successfully`);
 
-        // Send completion hook
+        // Send completion hook to dashboard
         await this.sendHook({
           agentId,
           claimId: options.claimId,
@@ -435,16 +462,34 @@ export class AgentSpawner {
           progress: 100,
           result: { stdout: stdout.trim() },
         });
+
+        // Emit lifecycle event to orchestrator
+        this.emitLifecycleEvent({
+          type: "completed",
+          agentId,
+          claimId: options.claimId,
+          issueId: options.issueId,
+          result: { stdout: stdout.trim() },
+        });
       } else {
         const errorMsg = stderr.trim() || `Process exited with code ${exitCode}`;
         this.logger.error(`Agent ${agentId} failed: ${errorMsg}`);
 
-        // Send failure hook
+        // Send failure hook to dashboard
         await this.sendHook({
           agentId,
           claimId: options.claimId,
           issueId: options.issueId,
           event: "failed",
+          error: errorMsg,
+        });
+
+        // Emit lifecycle event to orchestrator
+        this.emitLifecycleEvent({
+          type: "failed",
+          agentId,
+          claimId: options.claimId,
+          issueId: options.issueId,
           error: errorMsg,
         });
       }
@@ -456,12 +501,21 @@ export class AgentSpawner {
       // Clean up
       this.activeAgents.delete(agentId);
 
-      // Send failure hook
+      // Send failure hook to dashboard
       await this.sendHook({
         agentId,
         claimId: options.claimId,
         issueId: options.issueId,
         event: "failed",
+        error: errorMessage,
+      });
+
+      // Emit lifecycle event to orchestrator
+      this.emitLifecycleEvent({
+        type: "failed",
+        agentId,
+        claimId: options.claimId,
+        issueId: options.issueId,
         error: errorMessage,
       });
     }
