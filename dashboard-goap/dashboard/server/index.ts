@@ -6,6 +6,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { prettyJSON } from "hono/pretty-json";
 import { HTTPException } from "hono/http-exception";
+import { serveStatic } from "hono/bun";
 
 import { getConfig } from "./config";
 import { createStorage, closeStorage, type ClaimsStorage } from "./storage";
@@ -74,22 +75,11 @@ async function createApp() {
   app.route("/api/claims", createClaimsRoutes({ storage }));
   app.route("/api/hooks", hooksRoutes);
 
-  // Root endpoint
-  app.get("/", (c) => {
-    return c.json({
-      name: "Claims Dashboard API",
-      version: "0.1.0",
-      endpoints: {
-        health: "/health",
-        healthReady: "/health/ready",
-        healthLive: "/health/live",
-        authStatus: "/api/auth/status",
-        authLogin: "/api/auth/login",
-        authVerify: "/api/auth/verify",
-        claims: "/api/claims",
-      },
-    });
-  });
+  // Serve static files from dist/client
+  app.use("/assets/*", serveStatic({ root: "./dist/client" }));
+
+  // Serve index.html for SPA routes (must be after API routes)
+  app.get("*", serveStatic({ path: "./dist/client/index.html" }));
 
   // Global error handler
   app.onError((err, c) => {

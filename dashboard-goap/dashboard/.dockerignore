@@ -1,0 +1,36 @@
+# Environment files (use docker-compose env vars instead)
+.env
+.env.*
+!.env.example
+
+# Dependencies (installed fresh in container)
+node_modules/
+
+# Build output
+dist/
+
+# Development files
+.git/
+.github/
+.vscode/
+*.md
+!README.md
+Makefile
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker files (no need to copy into image)
+docker-compose*.yml
+Dockerfile*

@@ -10,6 +10,7 @@ export function loadConfig(): OrchestratorConfig {
   return {
     dashboardUrl:
       process.env.ORCHESTRATOR_DASHBOARD_URL ?? DEFAULT_CONFIG.dashboardUrl,
+    apiKey: process.env.ORCHESTRATOR_API_KEY,
     maxAgents: parseInt(
       process.env.ORCHESTRATOR_MAX_AGENTS ?? String(DEFAULT_CONFIG.maxAgents),
       10
@@ -34,6 +35,12 @@ export function loadConfig(): OrchestratorConfig {
       10
     ),
     workingDir: process.env.ORCHESTRATOR_WORKING_DIR ?? process.cwd(),
+    useWorktrees:
+      process.env.ORCHESTRATOR_USE_WORKTREES !== "false" &&
+      DEFAULT_CONFIG.useWorktrees,
+    cleanupWorktrees:
+      process.env.ORCHESTRATOR_CLEANUP_WORKTREES === "true" ||
+      DEFAULT_CONFIG.cleanupWorktrees,
   };
 }
 
@@ -84,10 +91,13 @@ export function validateConfig(config: OrchestratorConfig): string[] {
 export function printConfig(config: OrchestratorConfig): void {
   console.log("[orchestrator] Configuration:");
   console.log(`  Dashboard URL: ${config.dashboardUrl}`);
+  console.log(`  API Key: ${config.apiKey ? "***" : "(not set)"}`);
   console.log(`  Max Agents: ${config.maxAgents}`);
   console.log(`  Max Retries: ${config.maxRetries}`);
   console.log(`  Retry Delay: ${config.retryDelayMs}ms`);
   console.log(`  Poll Interval: ${config.pollIntervalMs}ms`);
   console.log(`  Graceful Shutdown: ${config.gracefulShutdownMs}ms`);
   console.log(`  Working Dir: ${config.workingDir}`);
+  console.log(`  Use Worktrees: ${config.useWorktrees}`);
+  console.log(`  Cleanup Worktrees: ${config.cleanupWorktrees}`);
 }

@@ -1,4 +1,7 @@
 
 # Runtime state
 .claude-flow/
+.claude/
 .swarm/
+node_modules/
+.jj/

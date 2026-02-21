@@ -1,8 +1,6 @@
 # Claims Dashboard - Docker Compose Configuration
 # Usage: docker-compose up --build
 
-version: '3.8'
-
 services:
   # ==============================================================================
   # PostgreSQL Database (RuVector compatible)
@@ -40,11 +38,16 @@ services:
       HOST: 0.0.0.0
       NODE_ENV: production
 
-      # Database
+      # Database (individual vars used by config.ts)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: claude_flow
+      POSTGRES_USER: claude
+      POSTGRES_PASSWORD: claude-flow-test
       DATABASE_URL: postgres://claude:claude-flow-test@postgres:5432/claude_flow
 
       # Auth
-      TEAM_SECRET: ${TEAM_SECRET:-changeme-in-production}
+      AUTH_SECRET: ${AUTH_SECRET:-secret}
 
       # GitHub sync (uncomment and configure to enable)
       # GITHUB_OWNER: your-org
@@ -56,7 +59,7 @@ services:
       # Claude Flow hooks (optional)
       # CLAUDE_FLOW_HOOK_URL: http://host.docker.internal:3001/hooks
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       postgres:
         condition: service_healthy

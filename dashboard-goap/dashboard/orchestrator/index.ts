@@ -22,12 +22,15 @@ Options:
 
 Environment Variables:
   ORCHESTRATOR_DASHBOARD_URL      Dashboard URL (default: http://localhost:3000)
+  ORCHESTRATOR_API_KEY            API key for dashboard authentication
   ORCHESTRATOR_MAX_AGENTS         Maximum concurrent agents (default: 4)
   ORCHESTRATOR_MAX_RETRIES        Maximum retry attempts (default: 2)
   ORCHESTRATOR_RETRY_DELAY_MS     Delay between retries in ms (default: 5000)
   ORCHESTRATOR_POLL_INTERVAL_MS   Polling interval in ms (default: 5000)
   ORCHESTRATOR_GRACEFUL_SHUTDOWN_MS  Graceful shutdown timeout (default: 30000)
   ORCHESTRATOR_WORKING_DIR        Working directory for agents
+  ORCHESTRATOR_USE_WORKTREES      Use git worktrees for isolation (default: true)
+  ORCHESTRATOR_CLEANUP_WORKTREES  Remove worktrees after completion (default: false)
 
 Examples:
   # Basic usage

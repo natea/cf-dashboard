@@ -1072,6 +1072,371 @@ dashboard/
 
 ---
 
+## 11. Milestone 8: Agent Orchestrator
+
+**Date Added**: 2026-01-19
+**Status**: Design Complete
+
+### 11.1 Overview
+
+The Agent Orchestrator is a thin CLI adapter that bridges the Claims Dashboard with Claude-Flow's existing swarm system. It watches the dashboard backlog via WebSocket and spawns agents using claude-flow CLI commands.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         ORCHESTRATOR                            │
+│                                                                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │ Backlog      │    │ Task Router  │    │ Agent Pool       │  │
+│  │ Watcher      │───▶│ (claude-flow)│───▶│ Manager          │  │
+│  │              │    │              │    │ (max N agents)   │  │
+│  └──────────────┘    └──────────────┘    └──────────────────┘  │
+│         │                                        │              │
+│         │ WebSocket                              │ spawn        │
+│         ▼                                        ▼              │
+└─────────┼────────────────────────────────────────┼──────────────┘
+          │                                        │
+          │                                        │
+┌─────────▼─────────┐                    ┌────────▼────────┐
+│                   │                    │                 │
+│    Dashboard      │◀───HTTP hooks──────│  Claude Code    │
+│    Server         │                    │  Agents         │
+│                   │                    │                 │
+└───────────────────┘                    └─────────────────┘
+```
+
+**Key Design Decisions**:
+- **Standalone CLI process** - Runs separately from dashboard (`bun run orchestrator`)
+- **Hybrid communication** - Orchestrator uses WebSocket, agents use HTTP hooks
+- **Claude-flow task routing** - Uses `hooks pre-task` for smart agent assignment
+- **Fixed pool size** - Simple concurrency limit (default: 4 agents)
+- **Simple retry** - Failed claims retry up to N times before marking as blocked
+
+### 11.2 Domain Model Extension
+
+```typescript
+// New: Orchestrator (Singleton Service)
+interface Orchestrator {
+  id: string;                    // "orchestrator-1"
+  status: OrchestratorStatus;    // 'idle' | 'running' | 'paused' | 'stopped'
+
+  // Pool state
+  activeAgents: Map<AgentId, SpawnedAgent>;
+  maxConcurrentAgents: number;   // From config
+
+  // Connection state
+  dashboardUrl: string;
+  wsConnected: boolean;
+  lastHeartbeat: Date;
+
+  // Stats
+  startedAt: Date;
+  claimsProcessed: number;
+  claimsSucceeded: number;
+  claimsFailed: number;
+}
+
+// New: SpawnedAgent (tracks agent lifecycle)
+interface SpawnedAgent {
+  agentId: string;               // "coder-abc123"
+  agentType: AgentType;          // "coder", "tester", etc.
+  modelTier: ModelTier;          // "haiku" | "sonnet" | "opus"
+
+  claimId: string;               // The claim this agent is working
+  issueId: string;               // External issue reference
+
+  status: SpawnedAgentStatus;    // 'spawning' | 'running' | 'completed' | 'failed'
+
+  // Retry tracking
+  attempts: number;
+  maxAttempts: number;           // Default: 3 (1 initial + 2 retries)
+  lastError?: string;
+
+  // Timing
+  spawnedAt: Date;
+  completedAt?: Date;
+}
+
+type ModelTier = 'wasm' | 'haiku' | 'sonnet' | 'opus';
+type SpawnedAgentStatus = 'spawning' | 'running' | 'completed' | 'failed';
+type OrchestratorStatus = 'idle' | 'running' | 'paused' | 'stopped';
+```
+
+### 11.3 State Machine
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ORCHESTRATOR STATE MACHINE                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌─────────┐    start()    ┌─────────┐                        │
+│   │  IDLE   │──────────────▶│ RUNNING │◀─────┐                 │
+│   └─────────┘               └────┬────┘      │                 │
+│        ▲                         │           │ resume()        │
+│        │ stop()                  │ pause()   │                 │
+│        │                         ▼           │                 │
+│   ┌────┴────┐               ┌─────────┐      │                 │
+│   │ STOPPED │◀──────────────│ PAUSED  │──────┘                 │
+│   └─────────┘    stop()     └─────────┘                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+RUNNING State Event Loop:
+─────────────────────────
+1. Receive WebSocket event from dashboard
+2. If event is "new claim in backlog":
+   a. Check if pool has capacity (activeAgents < maxConcurrent)
+   b. If no capacity → skip, claim stays in backlog
+   c. If capacity → route task via claude-flow CLI
+   d. Spawn agent with recommended type/model
+   e. Claim the issue via dashboard API
+   f. Track in activeAgents map
+3. If event is "agent completed" (via hooks):
+   a. Update claim status (review-requested or completed)
+   b. Remove from activeAgents
+   c. Check backlog for next claim
+4. If event is "agent failed":
+   a. If attempts < maxAttempts → retry with backoff
+   b. Else → release claim, mark as blocked
+```
+
+### 11.4 File Structure
+
+```
+dashboard/
+├── orchestrator/
+│   ├── index.ts              # CLI entry point
+│   ├── config.ts             # Configuration from env
+│   ├── orchestrator.ts       # Main Orchestrator class
+│   ├── dashboard-client.ts   # WebSocket + HTTP client for dashboard
+│   ├── agent-spawner.ts      # Wraps claude-flow CLI commands
+│   ├── task-router.ts        # Calls claude-flow hooks pre-task
+│   └── types.ts              # SpawnedAgent, OrchestratorStatus, etc.
+```
+
+### 11.5 Configuration
+
+```bash
+# .env additions
+ORCHESTRATOR_DASHBOARD_URL=http://localhost:3000
+ORCHESTRATOR_MAX_AGENTS=4
+ORCHESTRATOR_MAX_RETRIES=2
+ORCHESTRATOR_RETRY_DELAY_MS=5000
+ORCHESTRATOR_POLL_INTERVAL_MS=5000  # Fallback if WS disconnects
+```
+
+### 11.6 Claude-Flow Integration
+
+**Task Router** - Calls claude-flow for routing recommendations:
+```bash
+npx @claude-flow/cli@latest hooks pre-task --description "[issue title + body]"
+# Returns: [TASK_MODEL_RECOMMENDATION] Use model="haiku"
+#          [AGENT_TYPE_RECOMMENDATION] Use agent="coder"
+```
+
+**Agent Spawner** - Spawns via claude-flow swarm:
+```bash
+npx @claude-flow/cli@latest swarm init --topology hierarchical --max-agents 4
+npx @claude-flow/cli@latest agent spawn --type coder --id coder-abc123 --task-id claim-1
+```
+
+### 11.7 GOAP Actions
+
+```yaml
+action: CREATE_ORCHESTRATOR_TYPES
+  preconditions:
+    - hasProjectStructure: true
+  effects:
+    - hasOrchestratorTypes: true
+  cost: 1
+  deliverables:
+    - dashboard/orchestrator/types.ts
+  verification: "tsc --noEmit orchestrator/types.ts"
+
+action: CREATE_DASHBOARD_CLIENT
+  preconditions:
+    - hasOrchestratorTypes: true
+    - hasWebSocketHub: true
+  effects:
+    - hasDashboardClient: true
+  cost: 2
+  deliverables:
+    - dashboard/orchestrator/dashboard-client.ts
+  verification: "Connect to dashboard WS, receive snapshot"
+
+action: CREATE_TASK_ROUTER
+  preconditions:
+    - hasOrchestratorTypes: true
+  effects:
+    - hasTaskRouter: true
+  cost: 2
+  deliverables:
+    - dashboard/orchestrator/task-router.ts
+  verification: "Route sample task, get agent type recommendation"
+
+action: CREATE_AGENT_SPAWNER
+  preconditions:
+    - hasOrchestratorTypes: true
+    - hasTaskRouter: true
+  effects:
+    - hasAgentSpawner: true
+  cost: 2
+  deliverables:
+    - dashboard/orchestrator/agent-spawner.ts
+  verification: "Spawn test agent via claude-flow CLI"
+
+action: CREATE_ORCHESTRATOR_CORE
+  preconditions:
+    - hasDashboardClient: true
+    - hasTaskRouter: true
+    - hasAgentSpawner: true
+  effects:
+    - hasOrchestratorCore: true
+  cost: 3
+  deliverables:
+    - dashboard/orchestrator/orchestrator.ts
+    - dashboard/orchestrator/config.ts
+  verification: "Unit tests for state machine"
+
+action: CREATE_ORCHESTRATOR_CLI
+  preconditions:
+    - hasOrchestratorCore: true
+  effects:
+    - hasOrchestratorCli: true
+  cost: 1
+  deliverables:
+    - dashboard/orchestrator/index.ts
+    - package.json script update
+  verification: "bun run orchestrator --help"
+
+action: ADD_ORCHESTRATOR_TESTS
+  preconditions:
+    - hasOrchestratorCore: true
+  effects:
+    - hasOrchestratorTests: true
+  cost: 2
+  deliverables:
+    - dashboard/__tests__/orchestrator.test.ts
+  verification: "bun test orchestrator"
+```
+
+### 11.8 Action Sequence
+
+| # | Action | Effects | Cost |
+|---|--------|---------|------|
+| 30 | CREATE_ORCHESTRATOR_TYPES | hasOrchestratorTypes | 1 |
+| 31 | CREATE_DASHBOARD_CLIENT | hasDashboardClient | 2 |
+| 32 | CREATE_TASK_ROUTER | hasTaskRouter | 2 |
+| 33 | CREATE_AGENT_SPAWNER | hasAgentSpawner | 2 |
+| 34 | CREATE_ORCHESTRATOR_CORE | hasOrchestratorCore | 3 |
+| 35 | CREATE_ORCHESTRATOR_CLI | hasOrchestratorCli | 1 |
+| 36 | ADD_ORCHESTRATOR_TESTS | hasOrchestratorTests | 2 |
+
+**Total Cost**: 13
+**Estimated Time**: 8-10 hours
+
+### 11.9 Success Criteria
+
+- [ ] `bun run orchestrator` starts and connects to dashboard
+- [ ] Orchestrator claims unclaimed issues from backlog
+- [ ] Task routing returns agent type and model recommendations
+- [ ] Agents are spawned via claude-flow CLI
+- [ ] Agent completion updates claim status in dashboard
+- [ ] Failed agents retry up to configured limit
+- [ ] Graceful shutdown waits for active agents
+
+### 11.10 Verification Script
+
+```bash
+#!/bin/bash
+cd dashboard
+
+# Start dashboard
+bun run dev &
+sleep 3
+
+# Start orchestrator
+bun run orchestrator &
+sleep 2
+
+# Create a test claim in backlog
+curl -X POST http://localhost:3000/api/claims \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Test orchestrator claim", "description": "Should be picked up"}'
+
+# Wait for orchestrator to claim and spawn agent
+sleep 10
+
+# Verify claim was claimed
+curl http://localhost:3000/api/claims | jq '.[0] | {status, claimant}'
+# Should show status: "active", claimant.type: "agent"
+
+echo "Milestone 8: PASSED"
+```
+
+---
+
+## 12. Updated Complete Action Sequence
+
+```
+GOAP Optimal Path (36 actions, estimated cost: 77)
+
+1-29. [Previous milestones unchanged]
+                                 --- Milestone 7 Complete ---
+30. CREATE_ORCHESTRATOR_TYPES    [M8] cost=1
+31. CREATE_DASHBOARD_CLIENT      [M8] cost=2
+32. CREATE_TASK_ROUTER           [M8] cost=2
+33. CREATE_AGENT_SPAWNER         [M8] cost=2
+34. CREATE_ORCHESTRATOR_CORE     [M8] cost=3
+35. CREATE_ORCHESTRATOR_CLI      [M8] cost=1
+36. ADD_ORCHESTRATOR_TESTS       [M8] cost=2
+                                 --- Milestone 8 Complete ---
+                                 === GOAL STATE ACHIEVED ===
+```
+
+---
+
+## 13. Updated Time Estimation
+
+| Milestone | Actions | Cost | Est. Hours | Cumulative |
+|-----------|---------|------|------------|------------|
+| M1: Foundation | 5 | 6 | 4h | 4h |
+| M2: Backend Core | 5 | 12 | 8h | 12h |
+| M3: Real-time Backend | 3 | 8 | 6h | 18h |
+| M4: Frontend Foundation | 5 | 11 | 8h | 26h |
+| M5: Interactive Board | 3 | 7 | 5h | 31h |
+| M6: Integrations | 1 | 3 | 3h | 34h |
+| M7: Production Ready | 7 | 16 | 10h | 44h |
+| M8: Agent Orchestrator | 7 | 13 | 8h | 52h |
+| **Total** | **36** | **76** | **52h** | |
+
+**Estimated calendar time**: 6-7 working days (with focused effort)
+
+---
+
+## 14. Updated File Manifest
+
+```
+dashboard/
+├── ... (existing files from sections 1-10)
+│
+├── orchestrator/
+│   ├── index.ts              # CLI entry point
+│   ├── config.ts             # Configuration
+│   ├── orchestrator.ts       # Main class
+│   ├── dashboard-client.ts   # Dashboard WS/HTTP client
+│   ├── agent-spawner.ts      # Claude-flow CLI wrapper
+│   ├── task-router.ts        # Task routing
+│   └── types.ts              # Type definitions
+│
+└── __tests__/
+    ├── ... (existing tests)
+    └── orchestrator.test.ts  # Orchestrator tests
+```
+
+**Total Files**: ~52 source files + tests
+
+---
+
 ## Related Documents
 
 - [Claims Dashboard Design](./2026-01-19-claims-dashboard-design.md) - Main design document
@@ -1081,4 +1446,5 @@ dashboard/
 - [ADR-004: Frontend Architecture](../adr/ADR-004-frontend-architecture.md)
 - [ADR-005: Deployment](../adr/ADR-005-deployment.md)
 - [ADR-006: GitHub Integration](../adr/ADR-006-github-integration.md)
+- [ADR-007: Agent Orchestrator](../adr/ADR-007-agent-orchestrator.md)
 - [Domain Model](../ddd/domain-model.md)

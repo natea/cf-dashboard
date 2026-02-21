@@ -114,7 +114,7 @@ export class Orchestrator {
 
     // Initialize components
     this.dashboardClient = new DashboardClient(
-      { url: this.config.dashboardUrl },
+      { url: this.config.dashboardUrl, apiKey: this.config.apiKey },
       this.logger
     );
 
@@ -125,6 +125,8 @@ export class Orchestrator {
       workingDir: this.config.workingDir,
       logger: this.logger,
       onAgentLifecycle: (event) => this.handleAgentLifecycleEvent(event),
+      useWorktrees: this.config.useWorktrees,
+      cleanupWorktrees: this.config.cleanupWorktrees,
     });
 
     this.logger.info(`Orchestrator ${this.id} initialized`);
@@ -855,9 +857,9 @@ export class Orchestrator {
       this.claimsSucceeded++;
       this.activeAgents.delete(agentId);
 
-      // Move claim to needs_review status (not completed - that requires human approval)
+      // Move claim to review-requested status (not completed - that requires human approval)
       this.dashboardClient
-        .updateClaimStatus(claimId, "needs_review", 100)
+        .updateClaimStatus(claimId, "review-requested", 100)
         .catch((e) => {
           this.logger.warn(
             `Failed to update claim ${claimId} status: ${e instanceof Error ? e.message : String(e)}`
@@ -874,7 +876,7 @@ export class Orchestrator {
       });
 
       this.logger.info(
-        `Agent ${agentId} completed claim ${claimId} - moved to needs_review`
+        `Agent ${agentId} completed claim ${claimId} - moved to review-requested`
       );
 
       // Check if we're shutting down and all agents are done

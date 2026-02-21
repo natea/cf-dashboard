@@ -75,11 +75,23 @@ export interface ClaimsRoutesDeps {
 async function findClaim(storage: ClaimsStorage, identifier: string) {
   // First try direct lookup by issueId
   let claim = await storage.getClaim(identifier);
-  if (claim) return claim;
+  if (claim) {
+    console.log(`[claims] findClaim: found by issueId: ${identifier}`);
+    return claim;
+  }
 
   // If not found, search by id field
   const allClaims = await storage.listClaims();
-  return allClaims.find((c) => c.id === identifier) || null;
+  console.log(`[claims] findClaim: searching ${allClaims.length} claims for id: ${identifier}`);
+  const found = allClaims.find((c) => c.id === identifier);
+  if (found) {
+    console.log(`[claims] findClaim: found by id: ${identifier} -> issueId: ${found.issueId}`);
+  } else {
+    console.log(`[claims] findClaim: NOT FOUND: ${identifier}`);
+    // Log all claim ids for debugging
+    console.log(`[claims] Available claims: ${allClaims.map(c => `${c.id}:${c.issueId}`).join(', ')}`);
+  }
+  return found || null;
 }
 
 /**
@@ -114,6 +126,32 @@ function broadcastClaimDeleted(issueId: string): void {
     issueId,
   };
   hub.broadcast(event);
+}
+
+/**
+ * Validate claim state consistency:
+ * - "active" status requires a claimant
+ * - Removing claimant should reset status to "backlog"
+ */
+function validateClaimState(
+  existing: Claim | null,
+  updates: Partial<Claim>
+): Partial<Claim> {
+  const newStatus = updates.status ?? existing?.status;
+  const newClaimant = updates.claimant !== undefined ? updates.claimant : existing?.claimant;
+
+  // If setting to active without a claimant, reject
+  if (newStatus === "active" && !newClaimant) {
+    // Auto-correct: reset to backlog if no claimant
+    return { ...updates, status: "backlog" };
+  }
+
+  // If removing claimant while active, reset to backlog
+  if (updates.claimant === undefined && existing?.claimant && newStatus === "active") {
+    return { ...updates, status: "backlog" };
+  }
+
+  return updates;
 }
 
 export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
@@ -209,10 +247,13 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
 
     // Handle null claimant (unclaim) - convert null to undefined for storage
     const { claimant, ...rest } = result.data;
-    const updates = {
+    let updates: Partial<Claim> = {
       ...rest,
-      ...(claimant !== null && claimant !== undefined ? { claimant } : {}),
+      ...(claimant === null ? { claimant: undefined } : claimant !== undefined ? { claimant } : {}),
     };
+
+    // Validate state consistency (active requires claimant)
+    updates = validateClaimState(existing, updates);
 
     const updated = await deps.storage.updateClaim(existing.issueId, updates);
 
@@ -247,10 +288,13 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
 
     // Handle null claimant for PATCH
     const { claimant, ...rest } = result.data;
-    const patchUpdates = {
+    let patchUpdates: Partial<Claim> = {
       ...rest,
-      ...(claimant !== null && claimant !== undefined ? { claimant } : {}),
+      ...(claimant === null ? { claimant: undefined } : claimant !== undefined ? { claimant } : {}),
     };
+
+    // Validate state consistency (active requires claimant)
+    patchUpdates = validateClaimState(existing, patchUpdates);
 
     const updated = await deps.storage.updateClaim(existing.issueId, patchUpdates);
 
@@ -403,9 +447,13 @@ export function createClaimsRoutes(deps: ClaimsRoutesDeps) {
       });
     }
 
-    const changes = {
+    let changes: Partial<Claim> = {
       status: statusResult.data,
     };
+
+    // Validate state consistency (active requires claimant)
+    changes = validateClaimState(existing, changes);
+
     const updated = await deps.storage.updateClaim(existing.issueId, changes);
 
     if (updated) {

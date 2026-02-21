@@ -217,7 +217,7 @@ export class PostgresStorage implements ClaimsStorage {
     const updated: Claim = {
       ...existing,
       ...updates,
-      claimant: updates.claimant !== undefined ? updates.claimant : existing.claimant,
+      claimant: "claimant" in updates ? updates.claimant : existing.claimant,
       updatedAt: now,
     };
 

@@ -1,0 +1,8 @@
+node_modules/
+CLAUDE.md 
+.mcp.json
+.mcp.json.bak
+.claude/
+.claude-flow/
+.swarm/
+.jj/

@@ -3,17 +3,17 @@
 ## Bounded Contexts
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CLAIMS DASHBOARD SYSTEM                      │
-├─────────────────────┬─────────────────────┬────────────────────┤
-│   CLAIMS CONTEXT    │   AGENTS CONTEXT    │  IDENTITY CONTEXT  │
-│                     │                     │                    │
-│ • Claim (Aggregate) │ • Agent (Entity)    │ • User (Entity)    │
-│ • Issue (Entity)    │ • AgentActivity     │ • Session          │
-│ • Claimant (VO)     │   (Event)           │ • TeamAccess (VO)  │
-│ • ClaimStatus (VO)  │ • WorkerOutput      │                    │
-│ • Handoff (Entity)  │   (Event)           │                    │
-└─────────────────────┴─────────────────────┴────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                         CLAIMS DASHBOARD SYSTEM                               │
+├─────────────────────┬─────────────────────┬────────────────┬─────────────────┤
+│   CLAIMS CONTEXT    │   AGENTS CONTEXT    │  IDENTITY      │  ORCHESTRATION  │
+│                     │                     │  CONTEXT       │  CONTEXT        │
+│ • Claim (Aggregate) │ • Agent (Entity)    │ • User         │ • Orchestrator  │
+│ • Issue (Entity)    │ • AgentActivity     │ • Session      │   (Singleton)   │
+│ • Claimant (VO)     │   (Event)           │ • TeamAccess   │ • SpawnedAgent  │
+│ • ClaimStatus (VO)  │ • WorkerOutput      │                │ • RoutingResult │
+│ • Handoff (Entity)  │   (Event)           │                │   (VO)          │
+└─────────────────────┴─────────────────────┴────────────────┴─────────────────┘
 ```
 
 ## Claims Context
@@ -303,6 +303,110 @@ interface AgentsRepository {
 }
 ```
 
+## Orchestration Context
+
+### Orchestrator (Singleton Service)
+
+The orchestrator bridges the Claims Dashboard with Claude-flow's swarm system.
+
+```typescript
+interface Orchestrator {
+  id: string;                    // "orchestrator-1"
+  status: OrchestratorStatus;
+
+  // Pool state
+  activeAgents: Map<AgentId, SpawnedAgent>;
+  maxConcurrentAgents: number;   // From config (default: 4)
+
+  // Connection state
+  dashboardUrl: string;
+  wsConnected: boolean;
+  lastHeartbeat: Date;
+
+  // Stats
+  startedAt: Date;
+  claimsProcessed: number;
+  claimsSucceeded: number;
+  claimsFailed: number;
+}
+
+type OrchestratorStatus = 'idle' | 'running' | 'paused' | 'stopped';
+
+// State transitions
+const ORCHESTRATOR_TRANSITIONS: Record<OrchestratorStatus, OrchestratorStatus[]> = {
+  'idle':    ['running'],
+  'running': ['paused', 'stopped'],
+  'paused':  ['running', 'stopped'],
+  'stopped': [],  // Terminal state (restart creates new instance)
+};
+```
+
+### SpawnedAgent (Entity)
+
+Tracks the lifecycle of an agent spawned by the orchestrator.
+
+```typescript
+interface SpawnedAgent {
+  agentId: string;               // "coder-abc123"
+  agentType: AgentType;          // "coder", "tester", etc.
+  modelTier: ModelTier;          // Model used for this agent
+
+  claimId: string;               // The claim this agent is working
+  issueId: string;               // External issue reference
+
+  status: SpawnedAgentStatus;
+
+  // Retry tracking
+  attempts: number;              // Current attempt number
+  maxAttempts: number;           // Default: 3 (1 initial + 2 retries)
+  lastError?: string;
+
+  // Timing
+  spawnedAt: Date;
+  completedAt?: Date;
+}
+
+type ModelTier = 'wasm' | 'haiku' | 'sonnet' | 'opus';
+type SpawnedAgentStatus = 'spawning' | 'running' | 'completed' | 'failed';
+
+// State transitions
+const SPAWNED_AGENT_TRANSITIONS: Record<SpawnedAgentStatus, SpawnedAgentStatus[]> = {
+  'spawning':  ['running', 'failed'],
+  'running':   ['completed', 'failed'],
+  'completed': [],  // Terminal
+  'failed':    ['spawning'],  // Can retry → back to spawning
+};
+```
+
+### RoutingResult (Value Object)
+
+Result of task routing via claude-flow.
+
+```typescript
+interface RoutingResult {
+  agentType: AgentType;          // Recommended agent type
+  modelTier: ModelTier;          // Recommended model tier
+  useAgentBooster: boolean;      // True if WASM can handle this
+  confidence: number;            // 0-1 routing confidence
+  reasoning?: string;            // Why this routing was chosen
+}
+```
+
+### Orchestration Events
+
+Events emitted by the orchestration context:
+
+```typescript
+type OrchestratorEvent =
+  | { type: 'OrchestratorStarted'; orchestratorId: string; timestamp: Date }
+  | { type: 'OrchestratorStopped'; orchestratorId: string; reason: string; timestamp: Date }
+  | { type: 'AgentSpawned'; agent: SpawnedAgent; timestamp: Date }
+  | { type: 'AgentCompleted'; agentId: string; claimId: string; success: boolean; timestamp: Date }
+  | { type: 'AgentFailed'; agentId: string; claimId: string; error: string; willRetry: boolean; timestamp: Date }
+  | { type: 'ClaimAssigned'; claimId: string; agentId: string; routing: RoutingResult; timestamp: Date }
+  | { type: 'PoolCapacityReached'; activeCount: number; maxCount: number; timestamp: Date };
+```
+
 ## Invariants
 
 1. **Single Owner**: A claim can only have one claimant at a time
@@ -310,3 +414,6 @@ interface AgentsRepository {
 3. **Progress Range**: Progress must be 0-100
 4. **Handoff Acceptance**: Only the target claimant can accept a handoff
 5. **Completed is Terminal**: Completed claims cannot change status
+6. **Pool Capacity**: Orchestrator activeAgents.size <= maxConcurrentAgents
+7. **Retry Limit**: SpawnedAgent attempts <= maxAttempts
+8. **Single Orchestrator**: Only one orchestrator instance per dashboard

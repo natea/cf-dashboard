@@ -56,11 +56,12 @@ export interface SpawnedAgent {
 }
 
 // Valid state transitions for spawned agents
+// Note: spawning can go directly to completed for fast-completing agents
 export const SPAWNED_AGENT_TRANSITIONS: Record<
   SpawnedAgentStatus,
   SpawnedAgentStatus[]
 > = {
-  spawning: ["running", "failed"],
+  spawning: ["running", "completed", "failed"],
   running: ["completed", "failed"],
   completed: [], // Terminal
   failed: ["spawning"], // Can retry
@@ -182,12 +183,17 @@ export interface AgentHookPayload {
 
 export interface OrchestratorConfig {
   dashboardUrl: string;
+  apiKey?: string;
   maxAgents: number;
   maxRetries: number;
   retryDelayMs: number;
   pollIntervalMs: number;
   gracefulShutdownMs: number;
   workingDir?: string;
+  /** Use git worktrees to isolate each agent's work (default: true) */
+  useWorktrees: boolean;
+  /** Remove worktrees after agent completes (default: false - keep for review) */
+  cleanupWorktrees: boolean;
 }
 
 export const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -197,6 +203,8 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   retryDelayMs: 5000,
   pollIntervalMs: 5000,
   gracefulShutdownMs: 30000,
+  useWorktrees: true,
+  cleanupWorktrees: false,
 };
 
 // ============================================================================

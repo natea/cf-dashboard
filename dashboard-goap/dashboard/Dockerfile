@@ -4,7 +4,7 @@
 # ==============================================================================
 # Stage 1: Base image with Bun runtime
 # ==============================================================================
-FROM oven/bun:1.0-alpine AS base
+FROM oven/bun:1-alpine AS base
 WORKDIR /app
 
 # Install curl for healthcheck
@@ -16,7 +16,7 @@ RUN apk add --no-cache curl
 FROM base AS deps
 
 # Copy package files
-COPY package.json bun.lockb ./
+COPY package.json bun.lock ./
 
 # Install production dependencies only
 RUN bun install --frozen-lockfile --production
@@ -27,7 +27,7 @@ RUN bun install --frozen-lockfile --production
 FROM base AS builder
 
 # Copy all dependencies (including dev)
-COPY package.json bun.lockb ./
+COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Copy source code
