@@ -12,6 +12,7 @@ This directory contains Architecture Decision Records (ADRs) for the Claims Dash
 | [ADR-004](./ADR-004-frontend-architecture.md) | React Frontend Architecture | Proposed | 2026-01-19 |
 | [ADR-005](./ADR-005-deployment.md) | Docker Compose Deployment | Proposed | 2026-01-19 |
 | [ADR-006](./ADR-006-github-integration.md) | GitHub Integration (Read-Only) | Proposed | 2026-01-19 |
+| [ADR-007](./ADR-007-agent-orchestrator.md) | Agent Orchestrator | Proposed | 2026-01-19 |
 
 ## ADR Status Lifecycle
 
