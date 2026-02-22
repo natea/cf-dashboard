@@ -241,7 +241,7 @@ The `shared/` directory is the single source of truth for types used across serv
 │   ├── config.ts            # Orchestrator config loader
 │   ├── index.ts             # CLI entry point
 │   └── types.ts             # Orchestrator type definitions
-├── src/                     # React frontend
+├── frontend/                # React frontend
 │   ├── main.tsx             # App entry point
 │   ├── App.tsx              # Root component
 │   ├── index.css            # Tailwind base styles
