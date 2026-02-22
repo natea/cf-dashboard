@@ -15,9 +15,9 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./frontend/*"]
     }
   },
-  "include": ["server/**/*", "src/**/*", "orchestrator/**/*", "shared/**/*"],
+  "include": ["server/**/*", "frontend/**/*", "orchestrator/**/*", "shared/**/*"],
   "exclude": ["node_modules", "dist"]
 }
